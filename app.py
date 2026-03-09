@@ -2,31 +2,31 @@ from flask import Flask, request, send_file
 from rembg import remove, new_session
 import io
 import os
-from PIL import Image
+from PIL import Image, ImageEnhance
 
-# Configuração de pasta temporária para a IA baixar o modelo
 os.environ['U2NET_HOME'] = '/tmp/.u2net'
-
 app = Flask(__name__)
 
 @app.route('/')
 def index():
-    # Abre o arquivo index.html que você vai criar no Space
     with open('index.html', 'r', encoding='utf-8') as f:
         return f.read()
 
 @app.route('/remover-fundo', methods=['POST'])
 def remover_fundo():
     try:
-        if 'image' not in request.files:
-            return "Nenhuma imagem enviada", 400
-            
         file = request.files['image']
-        input_image = Image.open(file.stream).convert("RGB")
+        color = request.form.get('color', 'transparent')
         
-        # Usa a sessão u2netp (lite) para ser rápido e economizar RAM
+        input_image = Image.open(file.stream).convert("RGBA")
         output_image = remove(input_image, session=new_session("u2netp"))
         
+        if color != 'transparent':
+            # Cria um fundo da cor selecionada
+            background = Image.new("RGBA", output_image.size, color)
+            background.paste(output_image, (0, 0), output_image)
+            output_image = background
+
         img_io = io.BytesIO()
         output_image.save(img_io, 'PNG')
         img_io.seek(0)
@@ -35,5 +35,4 @@ def remover_fundo():
         return str(e), 500
 
 if __name__ == '__main__':
-    # Porta 7860 é a padrão do Hugging Face Spaces
     app.run(host='0.0.0.0', port=7860)
