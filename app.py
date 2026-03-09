@@ -1,11 +1,18 @@
 from flask import Flask, request, send_file, render_template_string
 from rembg import remove
 import io
+import os
 from PIL import Image
+
+# CONFIGURAÇÃO DE SEGURANÇA PARA IA NA RENDER
+# Isso evita o erro de "permissão negada" ao baixar o modelo da IA
+os.environ['U2NET_HOME'] = os.path.join(os.getcwd(), '.u2net')
+if not os.path.exists('.u2net'):
+    os.makedirs('.u2net')
 
 app = Flask(__name__)
 
-# --- SEU HTML PERSONALIZADO ---
+# --- SEU HTML PERSONALIZADO (MANTIDO IGUAL) ---
 HTML_TEMPLATE = '''
 <!DOCTYPE html>
 <html lang="pt-br">
@@ -87,13 +94,15 @@ HTML_TEMPLATE = '''
     <script>
         window.addEventListener('load', () => {
             setTimeout(() => {
-                document.getElementById('intro-overlay').animate([{ opacity: 1 }, { opacity: 0 }], { duration: 500, fill: 'forwards' }).onfinish = () => {
-                    document.getElementById('intro-overlay').style.display = 'none';
-                };
+                const overlay = document.getElementById('intro-overlay');
+                overlay.style.transition = 'opacity 0.5s';
+                overlay.style.opacity = '0';
+                setTimeout(() => overlay.style.display = 'none', 500);
             }, 2800);
         });
         const canvas = document.getElementById('mainCanvas'), ctx = canvas.getContext('2d'), cursor = document.getElementById('cursor-preview');
         let img = new Image(), isDrawing = false, brushSize = 25;
+        document.getElementById('tamanhoBorracha').oninput = (e) => brushSize = e.target.value;
         document.getElementById('fileInput').onchange = async (e) => {
             const file = e.target.files[0]; if (!file) return;
             document.getElementById('uploadPlaceholder').classList.add('hidden');
@@ -108,6 +117,7 @@ HTML_TEMPLATE = '''
                 document.getElementById('dropZone').classList.add('hidden');
                 document.getElementById('editorTools').classList.remove('hidden');
                 document.getElementById('canvasArea').classList.remove('hidden');
+                document.getElementById('loading').classList.add('hidden');
             };
         };
         canvas.onmousedown = (e) => { isDrawing = true; paint(e); };
@@ -125,10 +135,10 @@ HTML_TEMPLATE = '''
             ctx.arc(x, y, (brushSize * (canvas.width / rect.width)) / 2, 0, Math.PI * 2); ctx.fill();
         }
         function baixarImagem() {
-            const temp = document.createElement('canvas'), tCtx = temp.getContext('2d');
-            temp.width = canvas.width; temp.height = canvas.height;
-            tCtx.filter = canvas.style.filter; tCtx.drawImage(canvas, 0, 0);
-            const a = document.createElement('a'); a.download = 'Reizinhoda25_Edit.png'; a.href = temp.toDataURL(); a.click();
+            const link = document.createElement('a');
+            link.download = 'Reizinhoda25_Edit.png';
+            link.href = canvas.toDataURL();
+            link.click();
         }
     </script>
 </body>
@@ -141,13 +151,19 @@ def index():
 
 @app.route('/remover-fundo', methods=['POST'])
 def remover_fundo():
-    file = request.files['image']
-    input_image = Image.open(file.stream)
-    output_image = remove(input_image)
-    img_io = io.BytesIO()
-    output_image.save(img_io, 'PNG')
-    img_io.seek(0)
-    return send_file(img_io, mimetype='image/png')
+    try:
+        file = request.files['image']
+        input_image = Image.open(file.stream)
+        # O rembg remove o fundo aqui
+        output_image = remove(input_image)
+        img_io = io.BytesIO()
+        output_image.save(img_io, 'PNG')
+        img_io.seek(0)
+        return send_file(img_io, mimetype='image/png')
+    except Exception as e:
+        return str(e), 500
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=7860)
+    # PORTA DINÂMICA PARA A RENDER (CORRIGIDO)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)
