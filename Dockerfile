@@ -1,27 +1,26 @@
-# Usa uma imagem oficial do Python estável
+# Usa Python 3.11 estável
 FROM python:3.11-slim
 
-# Instala dependências do sistema para o OpenCV e IA
+# Instala pacotes do sistema (Corrigido para Debian Trixie/Hugging Face)
 RUN apt-get update && apt-get install -y \
-    libgl1-mesa-glx \
+    libgl1 \
     libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
-# Cria o diretório de trabalho
 WORKDIR /app
 
-# Copia os arquivos do seu projeto
+# Copia os arquivos do seu repositório
 COPY . .
 
-# Instala as bibliotecas do Python
+# Instala as dependências de IA
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Cria a pasta da IA com permissão total
+# Configura permissões para a IA baixar o modelo
 RUN mkdir -p /.u2net && chmod 777 /.u2net
 ENV U2NET_HOME=/.u2net
 
-# Porta que o Hugging Face usa por padrão
+# Porta padrão do Hugging Face
 EXPOSE 7860
 
-# Comando para ligar o servidor gunicorn
+# Inicia o servidor profissional
 CMD ["gunicorn", "-b", "0.0.0.0:7860", "app:app"]
