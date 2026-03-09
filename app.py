@@ -1,18 +1,20 @@
 from flask import Flask, request, send_file, render_template_string
-from rembg import remove
+from rembg import remove, new_session
 import io
 import os
 from PIL import Image
 
-# CONFIGURAÇÃO DE SEGURANÇA PARA IA NA RENDER
-# Isso evita o erro de "permissão negada" ao baixar o modelo da IA
-os.environ['U2NET_HOME'] = os.path.join(os.getcwd(), '.u2net')
-if not os.path.exists('.u2net'):
-    os.makedirs('.u2net')
+# --- CONFIGURAÇÕES DE AMBIENTE PARA A RENDER ---
+# Força a pasta de modelos para um local com permissão de escrita
+os.environ['U2NET_HOME'] = '/tmp/.u2net'
 
 app = Flask(__name__)
 
-# --- SEU HTML PERSONALIZADO (MANTIDO IGUAL) ---
+# Criamos uma sessão de IA leve (u2netp) para não estourar a memória da Render
+# Ela será carregada uma única vez quando o site ligar
+session = new_session("u2netp")
+
+# --- SEU HTML PERSONALIZADO COM ANIMAÇÃO ---
 HTML_TEMPLATE = '''
 <!DOCTYPE html>
 <html lang="pt-br">
@@ -68,24 +70,23 @@ HTML_TEMPLATE = '''
     <main class="max-w-4xl mx-auto px-6 pt-12">
         <div id="editorTools" class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8 hidden animate__animated animate__fadeIn">
             <div class="bg-slate-800/40 p-4 rounded-2xl border border-slate-700/50">
-                <label class="text-[10px] font-black text-emerald-400 uppercase block mb-2">Borracha</label>
+                <label class="text-[10px] font-black text-emerald-400 uppercase block mb-2">Borracha (Tamanho)</label>
                 <input type="range" id="tamanhoBorracha" min="5" max="100" value="25" class="w-full accent-emerald-500">
             </div>
             <div class="bg-slate-800/40 p-4 rounded-2xl border border-slate-700/50">
-                <label class="text-[10px] font-black text-blue-400 uppercase block mb-2">Ajustes</label>
-                <input type="range" id="brilho" min="50" max="150" value="100" class="w-full accent-blue-500 h-1 mb-2">
-                <input type="range" id="contraste" min="50" max="150" value="100" class="w-full accent-blue-500 h-1">
+                <label class="text-[10px] font-black text-blue-400 uppercase block mb-2 text-center">Status: Pronto</label>
+                <p class="text-[9px] text-slate-400 text-center">Use o mouse para retoques finais</p>
             </div>
-            <button onclick="baixarImagem()" class="btn-premium bg-emerald-600 text-white uppercase text-xs">Salvar HD</button>
+            <button onclick="baixarImagem()" class="btn-premium bg-emerald-600 text-white uppercase text-xs">Salvar em PNG</button>
         </div>
         <div id="dropZone" class="bg-slate-800/20 border-2 border-dashed border-slate-700 rounded-[2.5rem] p-16 text-center cursor-pointer relative group hover:border-emerald-500 transition-all">
             <input type="file" id="fileInput" accept="image/*" class="absolute inset-0 w-full h-full opacity-0 z-10 cursor-pointer">
             <div id="uploadPlaceholder">
                 <div class="w-16 h-16 bg-emerald-500/20 rounded-2xl mx-auto mb-4 flex items-center justify-center text-emerald-500"><svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" /></svg></div>
                 <h2 class="text-2xl font-black text-white uppercase">Escolha a Foto</h2>
-                <p class="text-slate-500 text-xs font-bold">BY REIZINHODA25</p>
+                <p class="text-slate-500 text-xs font-bold uppercase tracking-widest">By Reizinhoda25</p>
             </div>
-            <div id="loading" class="hidden flex flex-col items-center"><div class="loader-ring mb-4"></div><p class="text-emerald-400 font-black animate-pulse text-xs uppercase">Processando IA...</p></div>
+            <div id="loading" class="hidden flex flex-col items-center"><div class="loader-ring mb-4"></div><p class="text-emerald-400 font-black animate-pulse text-xs uppercase">A IA está trabalhando...</p></div>
         </div>
         <div id="canvasArea" class="hidden animate__animated animate__zoomIn mt-8">
             <div class="checkerboard rounded-3xl p-1 border-8 border-slate-900 flex justify-center overflow-hidden"><canvas id="mainCanvas"></canvas></div>
@@ -95,31 +96,41 @@ HTML_TEMPLATE = '''
         window.addEventListener('load', () => {
             setTimeout(() => {
                 const overlay = document.getElementById('intro-overlay');
-                overlay.style.transition = 'opacity 0.5s';
+                overlay.style.transition = 'opacity 0.5s ease';
                 overlay.style.opacity = '0';
                 setTimeout(() => overlay.style.display = 'none', 500);
             }, 2800);
         });
+
         const canvas = document.getElementById('mainCanvas'), ctx = canvas.getContext('2d'), cursor = document.getElementById('cursor-preview');
         let img = new Image(), isDrawing = false, brushSize = 25;
+
         document.getElementById('tamanhoBorracha').oninput = (e) => brushSize = e.target.value;
+
         document.getElementById('fileInput').onchange = async (e) => {
             const file = e.target.files[0]; if (!file) return;
             document.getElementById('uploadPlaceholder').classList.add('hidden');
             document.getElementById('loading').classList.remove('hidden');
+            
             const formData = new FormData(); formData.append('image', file);
-            const response = await fetch('/remover-fundo', { method: 'POST', body: formData });
-            const blob = await response.blob();
-            img.src = URL.createObjectURL(blob);
-            img.onload = () => {
-                canvas.width = img.width; canvas.height = img.height;
-                ctx.drawImage(img, 0, 0);
-                document.getElementById('dropZone').classList.add('hidden');
-                document.getElementById('editorTools').classList.remove('hidden');
-                document.getElementById('canvasArea').classList.remove('hidden');
-                document.getElementById('loading').classList.add('hidden');
-            };
+            try {
+                const response = await fetch('/remover-fundo', { method: 'POST', body: formData });
+                const blob = await response.blob();
+                img.src = URL.createObjectURL(blob);
+                img.onload = () => {
+                    canvas.width = img.width; canvas.height = img.height;
+                    ctx.drawImage(img, 0, 0);
+                    document.getElementById('dropZone').classList.add('hidden');
+                    document.getElementById('editorTools').classList.remove('hidden');
+                    document.getElementById('canvasArea').classList.remove('hidden');
+                    document.getElementById('loading').classList.add('hidden');
+                };
+            } catch (err) {
+                alert("Erro ao processar imagem. Tente uma foto menor.");
+                location.reload();
+            }
         };
+
         canvas.onmousedown = (e) => { isDrawing = true; paint(e); };
         window.onmouseup = () => isDrawing = false;
         canvas.onmousemove = (e) => {
@@ -127,6 +138,7 @@ HTML_TEMPLATE = '''
             cursor.style.width = brushSize + 'px'; cursor.style.height = brushSize + 'px';
             if (isDrawing) paint(e);
         };
+
         function paint(e) {
             const rect = canvas.getBoundingClientRect();
             const x = (e.clientX - rect.left) * (canvas.width / rect.width);
@@ -134,9 +146,10 @@ HTML_TEMPLATE = '''
             ctx.globalCompositeOperation = 'destination-out'; ctx.beginPath();
             ctx.arc(x, y, (brushSize * (canvas.width / rect.width)) / 2, 0, Math.PI * 2); ctx.fill();
         }
+
         function baixarImagem() {
             const link = document.createElement('a');
-            link.download = 'Reizinhoda25_Edit.png';
+            link.download = 'RemoverTab_Pro_Result.png';
             link.href = canvas.toDataURL();
             link.click();
         }
@@ -153,17 +166,18 @@ def index():
 def remover_fundo():
     try:
         file = request.files['image']
-        input_image = Image.open(file.stream)
-        # O rembg remove o fundo aqui
-        output_image = remove(input_image)
+        input_image = Image.open(file.stream).convert("RGB")
+        # Processamento com a sessão leve u2netp
+        output_image = remove(input_image, session=session)
         img_io = io.BytesIO()
         output_image.save(img_io, 'PNG')
         img_io.seek(0)
         return send_file(img_io, mimetype='image/png')
     except Exception as e:
+        print(f"Erro na IA: {e}")
         return str(e), 500
 
 if __name__ == '__main__':
-    # PORTA DINÂMICA PARA A RENDER (CORRIGIDO)
+    # Porta dinâmica para a Render
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
