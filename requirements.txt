@@ -1,5 +1,4 @@
 flask
 rembg
-pillow
 gunicorn
 onnxruntime-slim
